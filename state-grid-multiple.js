@@ -25,9 +25,6 @@
  5. 如果任何单位或个人认为该脚本可能涉嫌侵犯其权利，应及时通知并提供身份证明、所有权证明，我将在收到认证文件确认后删除
  6. 请勿将本脚本用于商业用途，由此引起的问题与作者无关
  7. 本脚本及其更新版权归原作者所有，RK001超时修复基于原脚本优化
- *****************************************
- * 原作者 𝒀𝒖𝒉𝒆𝒏𝒈 https://github.com/Yuheng0101/X
- * 修复：网络连接超时（RK001）、请求头缺失、无重试机制等问题
  ******************************************/
 const getEnv = () =>
   'undefined' != typeof $environment && $environment['surge-version']
@@ -611,31 +608,29 @@ async function login(e, o) {
   console.log('⏳ 登录中...');
   try {
     if (!Global.requestKey) throw new Error('requestKey未初始化，请重新获取');
-    const res = await retryRequest(async () => {
-      const r = {
-        url: `/api${$api.loginTestCodeNew}`,
-        method: 'post',
-        headers: { ...Global.requestKey },
-        data: {
-          loginKey: e, code: o,
-          params: {
-            uscInfo: { devciceIp: '', tenant: 'state_grid', member: '0902', devciceId: '' },
-            quInfo: { optSys: 'android', pushId: '000000', addressProvince: '110100', password: PASSWORD, addressRegion: '110101', account: USERNAME, addressCity: '330100' },
-          },
-          Channels: 'web',
+    // 【修改】移除登录的retryRequest包裹，直接请求一次
+    const r = {
+      url: `/api${$api.loginTestCodeNew}`,
+      method: 'post',
+      headers: { ...Global.requestKey },
+      data: {
+        loginKey: e, code: o,
+        params: {
+          uscInfo: { devciceIp: '', tenant: 'state_grid', member: '0902', devciceId: '' },
+          quInfo: { optSys: 'android', pushId: '000000', addressProvince: '110100', password: PASSWORD, addressRegion: '110101', account: USERNAME, addressCity: '330100' },
         },
-      };
-      return await request(r);
-    });
+        Channels: 'web',
+      },
+    };
+    const res = await request(r);
     const { bizrt: s } = res;
     if (!(s?.userInfo?.length > 0)) return Promise.reject('登录失败: 请检查信息填写是否正确! ');
     store.set('95598_bizrt', jsonStr(s)), (Global.bizrt = s),
     log.info('✅ 登录成功'),
     log.debug(`🔑 用户凭证: ${s.token}`, `👤 用户信息: ${s.userInfo[0].nickname || s.userInfo[0].loginAccount}`);
   } catch (e) {
-    return /验证错误/.test(e)
-      ? (log.error(`滑块验证出错, 重新登录: ${e}`), await doLogin())
-      : Promise.reject(`登陆失败: ${e}`);
+    // 【修改】移除验证错误的递归重新登录，失败直接拒绝
+    return Promise.reject(`登陆失败: ${e}`);
   } finally {
     console.log('🔚 登录结束');
   }
@@ -978,9 +973,9 @@ async function sendMsg(e, eleBill, dayList, monthElecQuantity) {
       '检查环境变量/BoxJs配置',
       { 'open-url': 'http://boxjs.com/#/sub/add/https%3A%2F%2Fraw.bgithub.xyz%2FYuheng0101%2FX%2Fmain%2FTasks%2Fboxjs.json' }
     );
-  // 核心流程：加重试+空值校验
+  // 核心流程：【修改】登录环节移除所有重试，失败直接退出
   await retryRequest(getKeyCode);
-  if (!(Global.bizrt?.token && Global.bizrt?.userInfo)) await retryRequest(doLogin);
+  if (!(Global.bizrt?.token && Global.bizrt?.userInfo)) await doLogin(); // 移除retryRequest包裹
   await retryRequest(getAuthcode);
   await retryRequest(getAccessToken);
   await retryRequest(getBindInfo);
@@ -1019,6 +1014,6 @@ async function sendMsg(e, eleBill, dayList, monthElecQuantity) {
   .catch(e => {
     /无效|失效|过期|重新获取|请求异常|RK001/.test(e) && (store.clear('95598_bizrt'), console.log('✅ 清理缓存数据成功')),
     log.error(`执行失败: ${e}`);
-    sendMsg(SCRIPTNAME, '脚本执行失败', `原因：${e}\n已自动清理缓存，可重试`);
-  })
-  .finally(done);
+    sendMsg(SCRIPTNAME, '脚本执行失败', `原因：${e}\n已自动清理缓存，需手动重试`);
+    done(); // 确保失败后直接退出
+  });
